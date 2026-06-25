@@ -122,6 +122,12 @@ As saídas dos experimentos (`data/`) não são versionadas.
 
 Bateria principal concluída: **1.332 ensaios** executados em AWS (preset `expandida`). As figuras do manuscrito são geradas por `analysis/figs_monografia.py` a partir dos dados coletados.
 
+## Uso de inteligência artificial
+
+Em conformidade com o Código de Conduta para Autores em Publicações da Sociedade Brasileira de Computação (SBC), declara-se o uso de ferramentas de inteligência artificial generativa na preparação deste trabalho. A ferramenta Claude (Anthropic) foi empregada como apoio em (i) revisão linguística e estilística do texto, (ii) assistência à redação a partir de conteúdo e resultados definidos pelo autor e (iii) geração de scripts auxiliares para as figuras a partir dos dados experimentais.
+
+A concepção do estudo, o desenho experimental, a execução da bateria de ensaios, a coleta e a análise dos dados, a interpretação dos resultados e as conclusões são de autoria exclusiva do autor, que revisou integralmente o material e assume total responsabilidade por seu conteúdo.
+
 ## Licença
 
 Código distribuído sob a licença MIT — ver [`LICENSE`](LICENSE).
