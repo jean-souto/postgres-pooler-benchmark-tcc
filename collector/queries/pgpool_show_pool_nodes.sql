@@ -1,0 +1,1 @@
+SHOW POOL_NODES;

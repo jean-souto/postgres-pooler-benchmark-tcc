@@ -1,0 +1,42 @@
+# PgCat — modo SESSION (template)
+# Cliente "possui" a conexão até desconectar. Cliff binário em clients > pool_size
+# (paridade com PgBouncer-session — núcleo de H3 do TCC).
+
+[general]
+host = "0.0.0.0"
+port = 6432
+admin_username = "pgcat_admin"
+admin_password = "pgcat_admin"
+worker_threads = 2
+
+connect_timeout = 5000
+idle_timeout = 600000
+healthcheck_timeout = 1000
+ban_time = 60
+server_lifetime = 3600000
+
+# auth_query desabilitado: bug do PgCat 1.2 (envia user sem aspas).
+# Password no [pools.users.0] basta pro experimento.
+# auth_query = "SELECT * FROM user_lookup($1)"
+# auth_query_user = "pgcat_auth"
+# auth_query_password = "pgcat_auth_pass"
+
+enable_prometheus_exporter = false
+
+[pools.tcc]
+pool_mode = "session"
+default_role = "any"
+# Em session mode prepared statements são "naturais" (cada cliente tem backend
+# fixo). Habilitado pra paridade com PgBouncer-session que também suporta.
+prepared_statements = true
+prepared_statements_cache_size = 500
+
+[pools.tcc.users.0]
+username = "tcc"
+password = "tcc"
+pool_size = __POOL_SIZE__
+statement_timeout = 0
+
+[pools.tcc.shards.0]
+servers = [["postgres", 5432, "primary"]]
+database = "tcc"

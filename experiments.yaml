@@ -1,0 +1,124 @@
+# ====================================================================
+# experiments.yaml — Matriz de experimentos do TCC connection poolers
+#
+# Cada `preset` define uma bateria. O orquestrador expande:
+#   setups × workloads × modes × pool_sizes × concurrencies × repetitions
+#
+# Notas:
+#   - setup=none ignora pool_sizes (1 run por combinação)
+#   - setup=pgbouncer-* / pgcat-* usam pool_sizes.pgbouncer (faixas idênticas)
+#   - overrides do preset sobrepõem defaults
+#   - Pgpool foi removido da matriz principal (decisão metodológica F2,
+#     dados preservados em data/legacy/2026-05-06_pre_pgcat/)
+# ====================================================================
+
+defaults:
+  warmup_s: 30                  # tempo de aquecimento antes da medição
+  measure_s: 60                 # tempo de medição (pgbench -T)
+  pgbench_log: true             # -l (log per-tx pra cauda de latência)
+  collector_interval_s: 1       # amostragem do collector
+  scale: 10                     # pgbench -i -s
+  overhead_s: 15                # estimativa de overhead/run (setup, save, etc)
+  seed: 42                      # seed da aleatorização (documentar pra reprodução)
+  max_backend_connections: 415  # max_connections do Postgres (db.t3.medium). Acima
+                                # disso, setup=none rejeita; runs marcados expected_failure
+
+presets:
+
+  smoke:
+    # ~60 runs, ~25min com 5 setups. Valida pipeline ponta-a-ponta.
+    # Inclui pgcat-tx e pgcat-session pra detectar problema de auth/setup
+    # antes da bateria longa.
+    setups: [none, pgbouncer-tx, pgbouncer-session, pgcat-tx, pgcat-session]
+    workloads: [read, write]
+    modes: [simple]
+    concurrencies: [1, 50, 500]
+    pool_sizes:
+      pgbouncer: [8]
+      pgcat: [8]
+    repetitions: 2
+    overrides:
+      warmup_s: 10
+      measure_s: 20
+
+  smoke-cloud:
+    # ~24 runs, ~12-15min. Igual ao smoke porém + rds-proxy (6º setup, só
+    # existe em --mode cloud). Valida ponta-a-ponta na nuvem ANTES da expandida:
+    # auth MD5 PgCat→RDS, SSH client→pooler, collector lendo admin DB, e o
+    # caminho gerenciado do RDS Proxy. reps=1 (smoke valida pipeline, não stats).
+    setups: [none, pgbouncer-tx, pgbouncer-session, pgcat-tx, pgcat-session, rds-proxy]
+    workloads: [read, write]
+    modes: [simple]
+    concurrencies: [1, 50]
+    pool_sizes:
+      pgbouncer: [8]
+      pgcat: [8]
+    repetitions: 1
+    overrides:
+      warmup_s: 10
+      measure_s: 20
+
+  preflight:
+    # ~60min, ~$0.50. Pré-voo ANTES da bateria expandida (~39h). Exercita as
+    # dimensões que o smoke-cloud NÃO tocou — onde mora o risco de quebrar na
+    # corrida longa:
+    #   - mode prepared (smoke foi 100% simple) — esp. rds-proxy pinning
+    #   - concorrência alta c=1000 (smoke foi até c=50) — pgbench -j, capacidade
+    #   - pools extremos 2 e 100 (smoke foi pool=8)
+    #   - workload mixed (smoke foi read/write)
+    # Se passar, a expandida roda com confiança real (mesma infra, sem re-apply).
+    setups: [none, pgbouncer-tx, pgbouncer-session, pgcat-tx, pgcat-session, rds-proxy]
+    workloads: [read, write, mixed]
+    modes: [simple, prepared]
+    concurrencies: [1, 1000]
+    pool_sizes:
+      pgbouncer: [2, 100]
+      pgcat:     [2, 100]
+    repetitions: 1
+    overrides:
+      warmup_s: 10
+      measure_s: 20
+
+  cirurgica:
+    # ~28h, 5 setups × 3 workloads × 2 modes × 5 concorrências × 3 pool_sizes
+    # × 3 reps. Bateria principal (publicável).
+    #
+    # Setups:
+    #   none — controle (sem pool_size, 1 cell por (workload,mode,c,rep))
+    #   pgbouncer-tx — single-thread event-driven, transaction
+    #   pgbouncer-session — single-thread event-driven, session
+    #   pgcat-tx — multi-thread Rust/tokio, transaction
+    #   pgcat-session — multi-thread Rust/tokio, session
+    setups: [none, pgbouncer-tx, pgbouncer-session, pgcat-tx, pgcat-session]
+    workloads: [read, write, mixed]
+    modes: [simple, prepared]
+    concurrencies: [1, 30, 100, 300, 1000]
+    pool_sizes:
+      pgbouncer: [2, 8, 100]    # sub / adequado / super
+      pgcat:     [2, 8, 100]    # mesmas faixas — paridade direta
+    repetitions: 3
+
+  expandida:
+    # ESTUDO PRINCIPAL (cloud). ~1.411 runs viáveis, ~41h. Inclui rds-proxy
+    # como 6º setup (só roda em --mode cloud). Concorrências intermediárias
+    # (50, 200, 500) dão resolução pra localizar o break-even c* com precisão.
+    setups: [none, pgbouncer-tx, pgbouncer-session, pgcat-tx, pgcat-session, rds-proxy]
+    workloads: [read, write, mixed]
+    modes: [simple, prepared]
+    concurrencies: [1, 30, 50, 100, 200, 300, 500, 1000]
+    pool_sizes:
+      pgbouncer: [2, 8, 100]
+      pgcat:     [2, 8, 100]
+    repetitions: 3
+
+  full:
+    # Cobertura completa (varredura mais densa). Não recomendado pra TCC
+    # — usa muito tempo de máquina sem ganho marginal grande de informação.
+    setups: [none, pgbouncer-tx, pgbouncer-session, pgcat-tx, pgcat-session]
+    workloads: [read, write, mixed]
+    modes: [simple, prepared]
+    concurrencies: [1, 5, 10, 30, 50, 100, 200, 500, 1000]
+    pool_sizes:
+      pgbouncer: [2, 8, 100]
+      pgcat:     [2, 8, 100]
+    repetitions: 5

@@ -1,0 +1,124 @@
+#!/bin/bash
+# ============================================================
+# user_data: EC2 cliente (orquestrador + pgbench + collector)
+# Roda como root via cloud-init. Logs: /var/log/cloud-init-output.log
+# ============================================================
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[client] === base packages ==="
+apt-get update -y
+apt-get install -y \
+  ca-certificates curl gnupg lsb-release \
+  build-essential git jq unzip rsync \
+  python3 python3-venv python3-pip
+
+echo "[client] === PGDG repo + postgresql-18 (psql + pgbench) ==="
+install -d /usr/share/postgresql-common/pgdg
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+CODENAME="$(lsb_release -cs)"
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $${CODENAME}-pgdg main" \
+  > /etc/apt/sources.list.d/pgdg.list
+apt-get update -y
+# pgbench NÃO vem em postgresql-client-18; só no pacote do servidor postgresql-18
+# (no PGDG não há contrib/pgbench standalone). Instalamos o server só pelo binário
+# pgbench e logo dropamos o cluster local — a client fala com o RDS, não roda PG.
+apt-get install -y postgresql-18
+systemctl stop postgresql || true
+systemctl disable postgresql || true
+pg_dropcluster --stop 18 main || true
+
+echo "[client] === venv Python (orquestrador + collector) ==="
+sudo -u ubuntu bash -c '
+set -euo pipefail
+cd /home/ubuntu
+python3 -m venv .venv
+.venv/bin/pip install --quiet --upgrade pip
+.venv/bin/pip install --quiet "psycopg[binary]~=3.2" "pandas~=2.2" "matplotlib~=3.9" "pyyaml~=6.0"
+'
+
+echo "[client] === ~/.pgpass (RDS, poolers, proxy) ==="
+sudo -u ubuntu bash -c '
+cat > /home/ubuntu/.pgpass <<EOF
+${db_endpoint}:5432:*:${db_username}:${db_password}
+*:5432:*:${db_username}:${db_password}
+*:6432:*:${db_username}:${db_password}
+*:6433:*:${db_username}:${db_password}
+*:6434:*:${db_username}:${db_password}
+*:6435:*:${db_username}:${db_password}
+EOF
+chmod 600 /home/ubuntu/.pgpass
+'
+
+echo "[client] === chave privada + ssh config pro pooler (controle docker via SSH) ==="
+sudo -u ubuntu bash -c '
+install -d -m 700 /home/ubuntu/.ssh
+cat > /home/ubuntu/.ssh/pooler_key <<EOF
+${pooler_private_key}
+EOF
+chmod 600 /home/ubuntu/.ssh/pooler_key
+cat >> /home/ubuntu/.ssh/config <<EOF
+
+Host pooler
+  HostName ${pooler_private_ip}
+  User ubuntu
+  IdentityFile /home/ubuntu/.ssh/pooler_key
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+EOF
+chmod 600 /home/ubuntu/.ssh/config
+'
+
+echo "[client] === segredos/atalhos pro orquestrador (gerar configs com a senha real) ==="
+sudo -u ubuntu bash -c '
+install -d -m 700 /home/ubuntu/.tcc
+cat > /home/ubuntu/.tcc/env <<EOF
+TCC_DB_ENDPOINT=${db_endpoint}
+TCC_DB_USER=${db_username}
+TCC_DB_PASSWORD=${db_password}
+TCC_DB_NAME=${db_name}
+TCC_POOLER_HOST=${pooler_private_ip}
+TCC_RDS_PROXY_ENDPOINT=${rds_proxy_endpoint}
+EOF
+chmod 600 /home/ubuntu/.tcc/env
+'
+cat >> /home/ubuntu/.bashrc <<EOF
+
+# TCC poolers — atalhos
+export PGHOST=${db_endpoint}
+export PGPORT=5432
+export PGUSER=${db_username}
+export PGDATABASE=${db_name}
+set -a; [ -f /home/ubuntu/.tcc/env ] && . /home/ubuntu/.tcc/env; set +a
+alias venv="source /home/ubuntu/.venv/bin/activate"
+EOF
+chown ubuntu:ubuntu /home/ubuntu/.bashrc
+
+echo "[client] === bootstrap RDS: aguarda, força MD5, extensions ==="
+# Retry até o RDS aceitar conexão (provisioning pode levar minutos).
+for i in $(seq 1 30); do
+  if PGPASSWORD='${db_password}' psql -h '${db_endpoint}' -p 5432 -U '${db_username}' -d '${db_name}' -tAc 'SELECT 1' >/dev/null 2>&1; then
+    echo "[client] RDS respondendo (tentativa $${i})."
+    break
+  fi
+  echo "[client] aguardando RDS... ($${i}/30)"
+  sleep 10
+done
+
+# SET password_encryption='md5' na MESMA sessão garante o hash MD5 mesmo que o
+# parameter group ainda não tenha aplicado (timing de reboot). Sem isso, o
+# master user pode ter nascido em SCRAM e o ALTER regravaria em SCRAM → PgCat
+# 1.2 (issue #255) falharia auth contra o RDS. Cria pg_stat_statements.
+PGPASSWORD='${db_password}' psql -h '${db_endpoint}' -p 5432 -U '${db_username}' -d '${db_name}' <<SQL || echo "[client] WARN: bootstrap SQL falhou — rodar manualmente"
+SET password_encryption = 'md5';
+ALTER USER ${db_username} WITH PASSWORD '${db_password}';
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+SELECT pg_stat_statements_reset();
+SQL
+
+echo "[client] === setup completo ==="
+echo "[client] Traga o repo do TCC pra /home/ubuntu/ (git clone ou rsync) e rode:"
+echo "[client]   cd Pratica && source ../.venv/bin/activate"
+echo "[client]   python -m orchestrator --mode cloud --preset expandida --output data"

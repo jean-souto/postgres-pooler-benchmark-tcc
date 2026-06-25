@@ -1,0 +1,149 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: tcc-postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tcc}
+      POSTGRES_USER: ${POSTGRES_USER:-tcc}
+      POSTGRES_DB: ${POSTGRES_DB:-tcc}
+      # MD5 globalmente: PgCat 1.2 e Odyssey 1.4 não suportam SCRAM client-side.
+      # --auth-host=md5 controla o pg_hba.conf gerado pelo entrypoint na PRIMEIRA
+      # criação do volume. password_encryption=md5 está em postgresql.conf.
+      POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=md5"
+    ports:
+      # 5435: 5433/5434 estão em uso por outros serviços do host (túnel SSH).
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./workload:/workload:ro
+      - ./data:/data:rw
+      - pgdata:/var/lib/postgresql
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    shm_size: 512mb  # margem pra DSM de parallel workers (cargas TPC-B normalmente não disparam, mas evita surpresa em hash joins)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tcc}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+
+  pgbouncer-tx:
+    profiles: ["pgbouncer-tx"]
+    image: edoburu/pgbouncer:v1.25.1-p0
+    container_name: tcc-pgbouncer-tx
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PGBOUNCER_TX_PORT:-6432}:6432"
+    volumes:
+      - ./pgbouncer/pgbouncer-transaction.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  pgbouncer-session:
+    profiles: ["pgbouncer-session"]
+    image: edoburu/pgbouncer:v1.25.1-p0
+    container_name: tcc-pgbouncer-session
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PGBOUNCER_SESSION_PORT:-6433}:6432"
+    volumes:
+      - ./pgbouncer/pgbouncer-session.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  pgcat-tx:
+    profiles: ["pgcat-tx"]
+    image: ghcr.io/postgresml/pgcat:v1.2.0
+    container_name: tcc-pgcat-tx
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PGCAT_TX_PORT:-6434}:6432"
+    volumes:
+      - ./pgcat/pgcat-tx.toml:/etc/pgcat/pgcat.toml:ro
+    command: ["pgcat", "/etc/pgcat/pgcat.toml"]
+    healthcheck:
+      # Imagem PgCat tem pg_isready (Debian-based, /usr/bin/pg_isready).
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  pgcat-session:
+    profiles: ["pgcat-session"]
+    image: ghcr.io/postgresml/pgcat:v1.2.0
+    container_name: tcc-pgcat-session
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PGCAT_SESSION_PORT:-6435}:6432"
+    volumes:
+      - ./pgcat/pgcat-session.toml:/etc/pgcat/pgcat.toml:ro
+    command: ["pgcat", "/etc/pgcat/pgcat.toml"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  # Pgpool removido da matriz principal (decisão metodológica, ver F2 da tese).
+  # Para reativar (uso pontual / análise de apêndice):
+  #   1. Descomentar bloco abaixo
+  #   2. Restaurar 'pgpool' em VALID_SETUPS (orchestrator/matrix.py)
+  #   3. Re-adicionar em experiments.yaml
+  #
+  # pgpool:
+  #   profiles: ["pgpool"]
+  #   image: bitnamilegacy/pgpool:4.6.3
+  #   container_name: tcc-pgpool
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   ports:
+  #     - "${PGPOOL_PORT:-9999}:5432"
+  #   environment:
+  #     PGPOOL_BACKEND_NODES: "0:postgres:5432"
+  #     PGPOOL_SR_CHECK_USER: tcc
+  #     PGPOOL_SR_CHECK_PASSWORD: tcc
+  #     PGPOOL_POSTGRES_USERNAME: tcc
+  #     PGPOOL_POSTGRES_PASSWORD: tcc
+  #     PGPOOL_ADMIN_USERNAME: admin
+  #     PGPOOL_ADMIN_PASSWORD: adminpass
+  #     PGPOOL_ENABLE_LOAD_BALANCING: "no"
+  #     PGPOOL_ENABLE_LOG_CONNECTIONS: "no"
+  #     PGPOOL_NUM_INIT_CHILDREN: "32"
+  #     PGPOOL_MAX_POOL: "4"
+  #     PGPOOL_CHILD_LIFE_TIME: "300"
+  #     PGPOOL_AUTHENTICATION_METHOD: md5
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5432'"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 15
+  #     start_period: 10s
+
+volumes:
+  pgdata:

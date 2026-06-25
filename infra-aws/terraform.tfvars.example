@@ -1,0 +1,28 @@
+# ============================================================
+# terraform.tfvars.example — copie pra terraform.tfvars e preencha.
+# terraform.tfvars NÃO é commitado (está no .gitignore).
+# ============================================================
+
+# ===== OBRIGATÓRIAS =====
+
+# Senha master do RDS (≥12 chars). Vai pro RDS e pros poolers (hash MD5).
+db_password = "TROCAR-min-12-caracteres"
+
+# Seu IP público em CIDR /32 (libera SSH na EC2 client + acesso baseline ao RDS).
+# Descubra com: curl -s ifconfig.me
+allowed_ssh_cidr = "200.123.45.67/32"
+
+# Nome de uma EC2 Key Pair JÁ existente na conta (você usa pra SSH).
+ssh_key_name = "tcc-poolers"
+
+# ===== OPCIONAIS (defaults sensatos — descomente pra mudar) =====
+
+# enable_rds_proxy = true          # 6º setup da matriz (default true)
+# aws_region            = "us-east-1"
+# availability_zone     = "us-east-1a"
+# rds_instance_class    = "db.m5.large"   # 2 vCPU dedicada
+# client_instance_type  = "m5.large"      # 2 vCPU
+# pooler_instance_type  = "m5.xlarge"     # 4 vCPU (espaço pro PgCat multi-thread)
+# rds_engine_version    = "18.3"
+# db_username           = "tcc"
+# db_name               = "tcc"

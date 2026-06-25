@@ -1,0 +1,55 @@
+# PgCat — modo TRANSACTION (template)
+# Renderizado por orchestrator/configs.py com pool_size variável.
+# Comentários sobre auth: PgCat 1.2 só aceita MD5 client-side (issue #255).
+# Postgres está com password_encryption=md5 e pg_hba md5. auth_query consulta
+# pg_shadow via função user_lookup() SECURITY DEFINER (init.sql).
+
+[general]
+host = "0.0.0.0"
+port = 6432
+admin_username = "pgcat_admin"
+admin_password = "pgcat_admin"
+
+# Multi-thread tokio: 2 worker threads casa com cpus=2.0 do container Postgres.
+# É um dos pontos centrais do experimento (vs PgBouncer single-thread).
+worker_threads = 2
+
+connect_timeout = 5000        # ms
+idle_timeout = 600000         # 10min — paridade com PgBouncer server_idle_timeout=600
+healthcheck_timeout = 1000
+ban_time = 60
+server_lifetime = 3600000     # 1h — paridade com PgBouncer
+
+# auth_query desabilitado: PgCat 1.2 tem bug que envia o nome do user como
+# identifier (sem aspas) na auth_query, causando ERROR 42703 "column tcc does
+# not exist". Como o experimento usa um único user fixo, o `password` no
+# [pools.users.0] basta — PgCat compara o MD5 que o cliente envia com o
+# password configurado. Função user_lookup() está pronta em init.sql caso
+# queiramos reativar auth_query no futuro.
+# auth_query = "SELECT * FROM user_lookup($1)"
+# auth_query_user = "pgcat_auth"
+# auth_query_password = "pgcat_auth_pass"
+
+# Prometheus metrics (bonus — não usado pelo collector hoje, fica disponível).
+enable_prometheus_exporter = false
+
+[pools.tcc]
+pool_mode = "transaction"
+default_role = "any"
+
+# ⭐ Feature central pra H4 (TCC): prepared statements em transaction mode.
+# PgCat 1.2 implementa cache global LRU com renomeação de statements pra evitar
+# colisão entre clientes. Tiger Data e Crunchy benchmarks reportam ganhos de
+# ~30% sobre extended protocol.
+prepared_statements = true
+prepared_statements_cache_size = 500
+
+[pools.tcc.users.0]
+username = "tcc"
+password = "tcc"
+pool_size = __POOL_SIZE__       # PLACEHOLDER — substituído por configs.py
+statement_timeout = 0           # 0 = sem timeout
+
+[pools.tcc.shards.0]
+servers = [["postgres", 5432, "primary"]]
+database = "tcc"

@@ -1,0 +1,40 @@
+#!/bin/bash
+# ============================================================
+# user_data: EC2 pooler (roda os 4 poolers via Docker, host network)
+# O orquestrador (na EC2 client) sobe um pooler por vez via SSH.
+# Roda como root via cloud-init. Logs: /var/log/cloud-init-output.log
+# ============================================================
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[pooler] === Docker engine + compose plugin ==="
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+ARCH="$(dpkg --print-architecture)"
+CODENAME="$(. /etc/os-release && echo "$${VERSION_CODENAME}")"
+echo "deb [arch=$${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $${CODENAME} stable" \
+  > /etc/apt/sources.list.d/docker.list
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+usermod -aG docker ubuntu
+systemctl enable --now docker
+
+echo "[pooler] === chave da client em authorized_keys (docker-control via SSH) ==="
+install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
+echo "${pooler_public_key}" >> /home/ubuntu/.ssh/authorized_keys
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
+
+echo "[pooler] === diretorio da stack (orquestrador faz rsync depois) ==="
+install -d -m 755 -o ubuntu -g ubuntu /opt/pooler-stack
+install -d -m 755 -o ubuntu -g ubuntu /opt/pooler-stack/generated
+
+echo "[pooler] === pre-pull das imagens (acelera primeiro 'up') ==="
+docker pull edoburu/pgbouncer:v1.25.1-p0 || true
+docker pull ghcr.io/postgresml/pgcat:v1.2.0 || true
+
+echo "[pooler] === setup completo. RDS backend: ${db_endpoint} ==="

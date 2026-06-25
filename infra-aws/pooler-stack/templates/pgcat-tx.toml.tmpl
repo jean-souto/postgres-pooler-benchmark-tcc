@@ -1,0 +1,45 @@
+# PgCat — modo TRANSACTION (CLOUD)
+# Template: __RDS_ENDPOINT__ e __POOL_SIZE__ substituídos pelo orquestrador.
+# Porta 6434. auth_query desabilitado (bug PgCat 1.2 — password hardcoded basta).
+
+[general]
+host = "0.0.0.0"
+port = 6434
+admin_username = "pgcat_admin"
+admin_password = "pgcat_admin"
+
+# Multi-thread tokio. 4 worker_threads aproveita a m5.xlarge (4 vCPU) — é onde
+# a vantagem multi-thread vs PgBouncer single-thread deve emergir (H3).
+worker_threads = 4
+
+# TLS no backend (pooler→RDS). RDS PG18 default rds.force_ssl=1 rejeita conexão
+# sem cifragem. Paridade: pgbench (libpq sslmode=prefer), pgbouncer (edoburu
+# server_tls_sslmode=prefer) e rds-proxy (TLS gerenciado) já usam TLS no backend
+# — sem isto o PgCat dava "Pool down: TimedOut". verify=false evita gerenciar o
+# CA bundle do RDS (mesma postura dos demais). TLS é ortogonal ao MD5 (auth).
+server_tls = true
+verify_server_certificate = false
+
+connect_timeout = 5000
+idle_timeout = 600000
+healthcheck_timeout = 1000
+ban_time = 60
+server_lifetime = 3600000
+
+enable_prometheus_exporter = false
+
+[pools.tcc]
+pool_mode = "transaction"
+default_role = "any"
+prepared_statements = true
+prepared_statements_cache_size = 500
+
+[pools.tcc.users.0]
+username = "tcc"
+password = "__DB_PASSWORD__"
+pool_size = __POOL_SIZE__
+statement_timeout = 0
+
+[pools.tcc.shards.0]
+servers = [["__RDS_ENDPOINT__", 5432, "primary"]]
+database = "tcc"

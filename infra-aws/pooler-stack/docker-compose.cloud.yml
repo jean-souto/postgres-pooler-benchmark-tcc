@@ -1,0 +1,79 @@
+# ============================================================
+# pooler-stack/docker-compose.cloud.yml
+# Roda NA EC2 pooler. SÓ os poolers (sem postgres — o banco é o RDS).
+# network_mode=host: elimina o NAT bridge do Docker, overhead de container
+# fica em ~namespaces de processo (negligível em latência de rede). Decisão
+# de rigor: ver docs/architecture.md (estudo cloud).
+#
+# Uso (o orquestrador roda via SSH na client):
+#   POOL_SIZE=8 docker compose -f docker-compose.cloud.yml --profile pgcat-tx up -d
+#
+# As configs em generated/ são geradas pelo orquestrador (configs.py modo
+# cloud, com RDS endpoint resolvido) e enviadas via rsync. POOL_SIZE seleciona
+# qual variante montar. Um pooler sobe por vez (isolamento de recursos).
+# ============================================================
+
+services:
+  pgbouncer-tx:
+    profiles: ["pgbouncer-tx"]
+    image: edoburu/pgbouncer:v1.25.1-p0
+    container_name: pooler-pgbouncer-tx
+    network_mode: host
+    restart: "no"
+    volumes:
+      - ./generated/pgbouncer-tx-pool${POOL_SIZE}.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  pgbouncer-session:
+    profiles: ["pgbouncer-session"]
+    image: edoburu/pgbouncer:v1.25.1-p0
+    container_name: pooler-pgbouncer-session
+    network_mode: host
+    restart: "no"
+    volumes:
+      - ./generated/pgbouncer-session-pool${POOL_SIZE}.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6433"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  pgcat-tx:
+    profiles: ["pgcat-tx"]
+    image: ghcr.io/postgresml/pgcat:v1.2.0
+    container_name: pooler-pgcat-tx
+    network_mode: host
+    restart: "no"
+    volumes:
+      - ./generated/pgcat-tx-pool${POOL_SIZE}.toml:/etc/pgcat/pgcat.toml:ro
+    command: ["pgcat", "/etc/pgcat/pgcat.toml"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6434"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  pgcat-session:
+    profiles: ["pgcat-session"]
+    image: ghcr.io/postgresml/pgcat:v1.2.0
+    container_name: pooler-pgcat-session
+    network_mode: host
+    restart: "no"
+    volumes:
+      - ./generated/pgcat-session-pool${POOL_SIZE}.toml:/etc/pgcat/pgcat.toml:ro
+    command: ["pgcat", "/etc/pgcat/pgcat.toml"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6435"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s

@@ -1,0 +1,76 @@
+# Outputs de experimentos
+data/
+*.csv
+*.parquet
+*.log
+
+# Postgres data
+postgres-data/
+pgdata/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.python-version
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+.docker-volume/
+
+# Análise temporária
+scratch/
+tmp/
+
+# Orchestrator runtime artifacts
+.orchestrator/
+pgbouncer/generated/
+pgcat/generated/
+
+# Cloud pooler-stack artifacts (gerados pelo orquestrador + rsynced)
+infra-aws/pooler-stack/generated/
+infra-aws/pooler-stack/userlist.txt
+
+# Terraform local state / plugins
+infra-aws/.terraform/
+infra-aws/*.tfstate
+infra-aws/*.tfstate.*
+infra-aws/.terraform.lock.hcl
+infra-aws/*.tfvars
+
+# Outputs de experimentos (cloud/variantes)
+data-*/
+infra-aws/tfplan
+infra-aws/tfplan-*
+
+# === Curadoria do repositório público ===
+# Mantidos localmente (continuam no disco do autor), fora do GitHub.
+
+# Monografia (fonte LaTeX) — destino é o repositório institucional, não o GitHub
+monografia/
+
+# Diretrizes internas do agente de IA (uso pessoal do autor)
+/CLAUDE.md
+
+# docs/ internos (diário de bordo, handoffs, auditorias, rascunhos).
+# Apenas docs/architecture.md é público.
+docs/*
+!docs/architecture.md

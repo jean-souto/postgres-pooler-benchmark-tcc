@@ -1,0 +1,40 @@
+# PgCat — modo SESSION (CLOUD)
+# Template: __RDS_ENDPOINT__ e __POOL_SIZE__ substituídos pelo orquestrador.
+# Porta 6435. Cliff binário em clients > pool_size (paridade pgbouncer-session).
+
+[general]
+host = "0.0.0.0"
+port = 6435
+admin_username = "pgcat_admin"
+admin_password = "pgcat_admin"
+worker_threads = 4
+
+# TLS no backend (pooler→RDS). RDS PG18 default rds.force_ssl=1 rejeita conexão
+# sem cifragem. Paridade com pgbench/pgbouncer/rds-proxy (todos já usam TLS no
+# backend). verify=false evita gerenciar o CA bundle. Ortogonal ao MD5 (auth).
+server_tls = true
+verify_server_certificate = false
+
+connect_timeout = 5000
+idle_timeout = 600000
+healthcheck_timeout = 1000
+ban_time = 60
+server_lifetime = 3600000
+
+enable_prometheus_exporter = false
+
+[pools.tcc]
+pool_mode = "session"
+default_role = "any"
+prepared_statements = true
+prepared_statements_cache_size = 500
+
+[pools.tcc.users.0]
+username = "tcc"
+password = "__DB_PASSWORD__"
+pool_size = __POOL_SIZE__
+statement_timeout = 0
+
+[pools.tcc.shards.0]
+servers = [["__RDS_ENDPOINT__", 5432, "primary"]]
+database = "tcc"
